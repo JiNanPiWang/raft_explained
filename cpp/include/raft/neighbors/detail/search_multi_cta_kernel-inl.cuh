@@ -81,6 +81,8 @@ namespace raft::neighbors::cagra::detail
                 max_itopk += 32 - (max_itopk % 32); 
 
             uint32_t num_new_parents = 0;
+            // 第一个warp中的第一个线程（lane_id为0）将处理索引为0、32、64...的元素。
+            // 第一个warp中的第二个线程（lane_id为1）将处理索引为1、33、65...的元素。
             for (uint32_t j = lane_id; j < max_itopk; j += 32)
             {
                 INDEX_T index;
@@ -105,6 +107,9 @@ namespace raft::neighbors::cagra::detail
 
                     // _popc用于计算一个整数中设置为1的位的数量
                     // 如果lane_id是3，那么((1 << lane_id) - 1)的结果将是0000 0111
+
+                    // 下面这行代码的目的是确定当前线程应该在next_parent_indices数组中的哪个位置写入它找到的新父节点的索引。
+                    // 这是通过计算当前线程之前有多少线程已经找到新父节点，并在此基础上添加之前已找到的新父节点的数量来实现的。
                     const auto i = __popc(ballot_mask & ((1 << lane_id) - 1)) + num_new_parents;
                     if (i < search_width)
                     {
