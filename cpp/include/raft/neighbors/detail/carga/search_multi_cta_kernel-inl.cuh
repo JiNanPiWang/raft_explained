@@ -14,7 +14,16 @@
  * limitations under the License.
  */
 /*
- *  2024-3-20
+ * 2024-3-20
+ */
+/*
+ * 全局内存 (Global Memory): 全局内存是在GPU设备上的内存，可以由所有GPU线程访问。
+ * 在代码中，如dataset_ptr, queries_ptr, knn_graph, seed_ptr, visited_hashmap_ptr, 
+ * result_indices_ptr, 和 result_distances_ptr等指针指向的是全局内存中的数据。
+ * 共享内存 (Shared Memory): 共享内存是在GPU上的快速但大小有限的存储空间，由同一个线程块（block）内的所有线程共享。
+ * 在代码中，extern __shared__ uint32_t smem[]; 分配的是共享内存，它在核函数search_kernel中被用作多种数据缓冲区的存储空间。
+ * 寄存器 (Registers): 寄存器是每个线程独有的非常快速的存储，用于存储局部变量。
+ * 在代码中，如warp_id, lane_id, block_id, num_blocks, iter等都可能被存储在寄存器中。
 */
 #pragma once
 
@@ -223,6 +232,8 @@ namespace raft::neighbors::cagra::detail
 #endif
             _CLK_START();
 
+            // 声明了一个外部定义的共享内存数组 smem，它是一个无边界大小的数组，
+            // 这意味着数组的大小是在运行时确定的，具体大小取决于核函数启动配置时分配的共享内存大小。
             extern __shared__ uint32_t smem[];
 
             // Layout of result_buffer
@@ -231,13 +242,20 @@ namespace raft::neighbors::cagra::detail
             // | <itopk_size>   | <search_width * graph_degree> | upto 32 |
             // +----------------+------------------------------+---------+
             // |<---          result_buffer_size           --->|
+            // 用于存储top-k查询结果的缓冲区和父节点的邻居信息，padding用于确保数据对齐
+
             uint32_t result_buffer_size = itopk_size + (search_width * graph_degree);
             uint32_t result_buffer_size_32 = result_buffer_size;
-            if (result_buffer_size % 32) { result_buffer_size_32 += 32 - (result_buffer_size % 32); }
+            if (result_buffer_size % 32) 
+            { 
+                result_buffer_size_32 += 32 - (result_buffer_size % 32); 
+            }
             assert(result_buffer_size_32 <= MAX_ELEMENTS);
 
+            // ceildiv: Provide a ceiling division operation ie. ceil(a / b)
             const auto query_smem_buffer_length =
                     raft::ceildiv<uint32_t>(dataset_dim, DATASET_BLOCK_DIM) * DATASET_BLOCK_DIM;
+            // 构建指向不同数据段的指针
             auto query_buffer = reinterpret_cast<float *>(smem);
             auto result_indices_buffer = reinterpret_cast<INDEX_T *>(query_buffer + query_smem_buffer_length);
             auto result_distances_buffer =
